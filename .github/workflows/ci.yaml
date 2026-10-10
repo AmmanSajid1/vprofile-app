@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   build:
@@ -30,8 +31,18 @@ jobs:
 
       - name: Build Docker image
         run: docker build -f Docker-files/app/Dockerfile -t vprofile-app:test .
-  
 
-      
+      - name: Configure AWS credentials
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::464209272334:role/vprofile-app-github-ci
+          aws-region: us-east-1
+
+      - name: Verify AWS identity
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: aws sts get-caller-identity
+
+
 
     
