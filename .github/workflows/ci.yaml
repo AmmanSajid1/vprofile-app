@@ -48,15 +48,31 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Tag and push docker image
+      - name: Check if Docker image exists in ECR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: check-image
         env:
-          ECR_REGISTRY: "${{ steps.login-ecr.outputs.registry }}"
-          ECR_REPOSITORY: "vprofile-app"
-          IMAGE_TAG: "${{ github.sha }}"
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          if aws ecr describe-images \
+            --repository-name vprofile-app \
+            --image-ids imageTag="$IMAGE_TAG" > /dev/null 2>&1; then
+            echo "Image already exists in ECR."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Image not found in ECR."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tag and push Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check-image.outputs.exists == 'false'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: vprofile-app
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           docker tag vprofile-app:test \
-            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+            "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
           docker push \
-            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+            "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
