@@ -28,6 +28,10 @@ jobs:
       - name: Build with Maven
         run: mvn --batch-mode clean verify
 
+      - name: Build Docker image
+        run: docker build -f Docker-files/app/Dockerfile -t vprofile-app:test .
+  
+
       
 
     
