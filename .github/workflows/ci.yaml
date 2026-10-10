@@ -56,12 +56,23 @@ jobs:
         run: |
           if aws ecr describe-images \
             --repository-name vprofile-app \
-            --image-ids imageTag="$IMAGE_TAG" > /dev/null 2>&1; then
+            --image-ids imageTag="$IMAGE_TAG" \
+            > /dev/null 2> ecr-error.txt; then
+
             echo "Image already exists in ECR."
             echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Image not found in ECR."
+
+          elif grep -q "ImageNotFoundException" ecr-error.txt; then
+
+            echo "Image does not exist in ECR."
             echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "Unexpected AWS ECR error:"
+            cat ecr-error.txt
+            exit 1
+
           fi
 
       - name: Tag and push Docker image
