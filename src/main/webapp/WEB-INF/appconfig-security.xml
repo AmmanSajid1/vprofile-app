@@ -11,6 +11,7 @@
 		<intercept-url pattern="/resources/**" access="permitAll" />
 		<intercept-url pattern="/users" access="hasRole('ADMIN')" />
 		<intercept-url pattern="/users/**" access="hasRole('ADMIN')" />
+		<intercept-url pattern="/health" access="permitAll" />
 		<intercept-url pattern="/**" access="isAuthenticated()" />
 		<form-login login-page="/login" default-target-url="/welcome"
 			authentication-failure-url="/login?error"
