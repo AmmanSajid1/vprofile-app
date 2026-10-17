@@ -8,6 +8,7 @@ import com.visualpathit.account.model.User;
 public interface UserService {
 	/** {@inheritDoc}} !*/
     void save(User user);
+    void update(User user);
     /** {@inheritDoc}} !*/
     User findByUsername(String username);
     User findById(long id);

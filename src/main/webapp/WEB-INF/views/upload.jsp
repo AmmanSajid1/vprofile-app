@@ -30,7 +30,7 @@
 <div class="container">  
   <div class="panel panel-default">
   <h2 align="center">Upload Image </h2>
-    <form action="./uploadFile?${_csrf.parameterName}=${_csrf.token}" method="post" enctype="multipart/form-data">
+    <form action="./uploadFile" method="post" enctype="multipart/form-data">
 		<span>${pageContext.request.userPrincipal.name}</span> <br/>
 		<div class="form-group">
 	      <label for="file">Image Upload</label>
@@ -42,7 +42,6 @@
     	</div>
 		<div class="align-center">
  			<input type="hidden"  name="${_csrf.parameterName}"   value="${_csrf.token}"/>
- 			<input type="hidden"  name="userName"   value="${pageContext.request.userPrincipal.name}"/> 
 
 		</div>
 	</form>	

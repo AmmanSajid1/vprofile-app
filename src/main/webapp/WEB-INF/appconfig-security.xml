@@ -6,13 +6,17 @@
 						http://www.springframework.org/schema/security http://www.springframework.org/schema/security/spring-security.xsd">
 
 	<http auto-config="true">
-		<intercept-url pattern="/" access="hasRole('ROLE_USER')" />
-		<intercept-url pattern="/welcome" access="hasRole('ROLE_USER')" />
+		<intercept-url pattern="/login" access="permitAll" />
+		<intercept-url pattern="/registration" access="permitAll" />
+		<intercept-url pattern="/resources/**" access="permitAll" />
+		<intercept-url pattern="/users" access="hasRole('ADMIN')" />
+		<intercept-url pattern="/users/**" access="hasRole('ADMIN')" />
+		<intercept-url pattern="/**" access="isAuthenticated()" />
 		<form-login login-page="/login" default-target-url="/welcome"
 			authentication-failure-url="/login?error"
 			username-parameter="username" password-parameter="password" />
 		<logout logout-success-url="/login?logout" />
-		<csrf disabled="true" />
+		<csrf />
 	</http>
 
 	<authentication-manager alias="authenticationManager">

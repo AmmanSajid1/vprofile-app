@@ -27,7 +27,8 @@ import com.visualpathit.account.model.User;
 import com.visualpathit.account.service.UserService;
 import com.visualpathit.account.utils.ElasticsearchUtil;
 
-@Controller
+// Elasticsearch integration disabled: not part of the EKS deployment.
+// @Controller
 public class ElasticSearchController {
 
     @Autowired

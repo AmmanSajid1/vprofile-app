@@ -13,6 +13,7 @@ import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.security.Principal;
 import java.util.List;
 import java.util.UUID;
 
@@ -117,18 +118,36 @@ public class UserController {
     }
 
     @GetMapping("/user/{username}")
-    public String userUpdate(@PathVariable("username") String username, Model model) {
-        User user = userService.findByUsername(username);
+    public String userUpdate(
+            @PathVariable("username") String username,
+            Principal principal,
+            Model model) {
+
+        if (!principal.getName().equals(username)) {
+            return "redirect:/welcome";
+        }
+
+        User user = userService.findByUsername(principal.getName());
         model.addAttribute("user", user);
         return "userUpdate";
     }
 
     @PostMapping("/user/{username}")
-    public String userUpdateProfile(@PathVariable("username") String username, @ModelAttribute("user") User userForm) {
-        User user = userService.findByUsername(username);
+    public String userUpdateProfile(
+            @PathVariable("username") String username,
+            @ModelAttribute("user") User userForm,
+            Principal principal) {
+
+        if (!principal.getName().equals(username)) {
+            return "redirect:/welcome";
+        }
+
+        User user = userService.findByUsername(principal.getName());
+
         updateUserDetails(user, userForm);
-        userService.save(user);
-        return "welcome";
+        userService.update(user);
+
+        return "redirect:/welcome";
     }
 
 //    @GetMapping("/user/rabbit")
@@ -140,7 +159,6 @@ public class UserController {
 //    }
 
     private void updateUserDetails(User user, User userForm) {
-        user.setUsername(userForm.getUsername());
         user.setUserEmail(userForm.getUserEmail());
         user.setDateOfBirth(userForm.getDateOfBirth());
         user.setFatherName(userForm.getFatherName());

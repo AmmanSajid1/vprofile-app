@@ -1,6 +1,7 @@
 package com.visualpathit.account.service;
 
 import com.visualpathit.account.model.User;
+import com.visualpathit.account.model.Role;
 import com.visualpathit.account.repository.RoleRepository;
 import com.visualpathit.account.repository.UserRepository;
 
@@ -8,8 +9,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.util.HashSet;
 import java.util.List;
+import java.util.Collections;
 
 /** {@author imrant}!*/
 @Service
@@ -26,8 +27,20 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void save(final User user) {
+        Role userRole = roleRepository.findByName("ROLE_USER");
+
+        if (userRole == null) {
+            throw new IllegalStateException("ROLE_USER not found in database");
+        }
+
         user.setPassword(bCryptPasswordEncoder.encode(user.getPassword()));
-        user.setRoles(new HashSet<>(roleRepository.findAll()));
+        user.setRoles(Collections.singleton(userRole));
+
+        userRepository.save(user);
+    }
+
+    @Override
+    public void update(final User user) {
         userRepository.save(user);
     }
 

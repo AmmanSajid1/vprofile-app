@@ -4,6 +4,7 @@ import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.util.List;
+import java.security.Principal;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +20,8 @@ import org.springframework.web.multipart.MultipartFile;
 import com.visualpathit.account.model.User;
 import com.visualpathit.account.service.UserService;
 
-@Controller
+// File uploads disabled until secure S3 storage is implemented.
+// @Controller
 public class FileUploadController {
 	 @Autowired
 	    private UserService userService;
@@ -35,8 +37,10 @@ public class FileUploadController {
     }
 	@RequestMapping(value = "/uploadFile", method = RequestMethod.POST)
 	public @ResponseBody
-	String uploadFileHandler(@RequestParam("name") String name,@RequestParam("userName") String userName,
-			@RequestParam("file") MultipartFile file) {
+	String uploadFileHandler(
+        @RequestParam("name") String name,
+        @RequestParam("file") MultipartFile file,
+        Principal principal) {
 		
 		System.out.println("Called the upload file :::" );
 		if (!file.isEmpty()) {
@@ -54,10 +58,10 @@ public class FileUploadController {
 				File serverFile = new File(dir.getAbsolutePath()
 						+ File.separator + name+".png");
 				//image saving 
-				User user = userService.findByUsername(userName);
+				User user = userService.findByUsername(principal.getName());
 				user.setProfileImg(name +".png");
 				user.setProfileImgPath(serverFile.getAbsolutePath());
-				userService.save(user);
+				userService.update(user);
 				
 				BufferedOutputStream stream = new BufferedOutputStream(
 						new FileOutputStream(serverFile));
