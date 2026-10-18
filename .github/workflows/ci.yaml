@@ -18,6 +18,10 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: vprofile-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -224,6 +228,18 @@ jobs:
               "https://x-access-token:${GH_TOKEN}@github.com/AmmanSajid1/vprofile-gitops.git" \
               "$BRANCH"
           fi
+
+          # Close outdated automated dev image update PRs
+          for PR in $(gh pr list \
+            --repo AmmanSajid1/vprofile-gitops \
+            --state open \
+            --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"ci/update-dev-images-\") and .headRefName != \"${BRANCH}\") | .number"); do
+
+            gh pr close "$PR" \
+              --repo AmmanSajid1/vprofile-gitops \
+              --comment "Superseded by application commit $IMAGE_TAG."
+          done
 
           PR_NUMBER=$(gh pr list \
             --repo AmmanSajid1/vprofile-gitops \
