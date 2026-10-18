@@ -158,4 +158,90 @@ jobs:
         run: |
           gh repo view AmmanSajid1/vprofile-gitops \
             --json nameWithOwner \
-            --jq '.nameWithOwner'     
+            --jq '.nameWithOwner'
+
+      - name: Checkout GitOps repository
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/checkout@v4
+        with:
+          repository: AmmanSajid1/vprofile-gitops
+          token: ${{ steps.gitops-token.outputs.token }}
+          path: gitops
+          persist-credentials: false
+
+      - name: Install Kustomize
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+          kustomize version
+
+      - name: Update dev image tags
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd gitops/apps/vprofile/overlays/dev
+
+          kustomize edit set image \
+            "464209272334.dkr.ecr.us-east-1.amazonaws.com/vprofile-app=464209272334.dkr.ecr.us-east-1.amazonaws.com/vprofile-app:$IMAGE_TAG" \
+            "464209272334.dkr.ecr.us-east-1.amazonaws.com/vprofile-flyway=464209272334.dkr.ecr.us-east-1.amazonaws.com/vprofile-flyway:$IMAGE_TAG"
+
+          echo "Updated image references:"
+          grep -A6 '^images:' kustomization.yaml
+
+      - name: Create GitOps image update PR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ steps.gitops-token.outputs.token }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd gitops
+
+          BRANCH="ci/update-dev-images-${IMAGE_TAG}"
+
+          git config user.name "vprofile-gitops-automation[bot]"
+          git config user.email "vprofile-gitops-automation[bot]@users.noreply.github.com"
+          # Check whether this commit already has a GitOps branch
+          if git ls-remote --exit-code \
+            "https://x-access-token:${GH_TOKEN}@github.com/AmmanSajid1/vprofile-gitops.git" \
+            "refs/heads/$BRANCH" > /dev/null; then
+
+            echo "GitOps branch already exists. Checking for an open PR."
+
+          else
+            git switch -c "$BRANCH"
+            git add apps/vprofile/overlays/dev/kustomization.yaml
+
+            if git diff --cached --quiet; then
+              echo "No image changes required."
+              exit 0
+            fi
+
+            git commit -m "ci: update dev image tags to $IMAGE_TAG"
+
+            git push \
+              "https://x-access-token:${GH_TOKEN}@github.com/AmmanSajid1/vprofile-gitops.git" \
+              "$BRANCH"
+          fi
+
+          PR_NUMBER=$(gh pr list \
+            --repo AmmanSajid1/vprofile-gitops \
+            --head "AmmanSajid1:$BRANCH" \
+            --base main \
+            --state all \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "GitOps PR #$PR_NUMBER already exists. No duplicate required."
+          else
+            gh pr create \
+              --repo AmmanSajid1/vprofile-gitops \
+              --head "AmmanSajid1:$BRANCH" \
+              --base main \
+              --title "ci: deploy application $IMAGE_TAG to dev" \
+              --body "Updates the vProfile application and Flyway images to commit $IMAGE_TAG.
+
+          Both images were built and published successfully by the application CI pipeline."
+          fi
