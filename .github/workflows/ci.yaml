@@ -140,3 +140,22 @@ jobs:
 
           docker push \
             "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+      - name: Generate GitOps GitHub App token
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: gitops-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          owner: AmmanSajid1
+          repositories: vprofile-gitops
+
+      - name: Verify GitOps repository access
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ steps.gitops-token.outputs.token }}
+        run: |
+          gh repo view AmmanSajid1/vprofile-gitops \
+            --json nameWithOwner \
+            --jq '.nameWithOwner'     
