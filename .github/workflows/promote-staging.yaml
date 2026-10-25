@@ -1,0 +1,252 @@
+name: Promote vProfile to Staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: vprofile-staging-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate GitOps GitHub App token
+        id: gitops-token
+        uses: actions/create-github-app-token@v2
+        env:
+          GITOPS_REPO: ${{ vars.GITOPS_REPO }}
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ vars.GITOPS_REPO_NAME }}
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GITOPS_REPO }}
+          ref: main
+          token: ${{ steps.gitops-token.outputs.token }}
+          path: gitops
+          persist-credentials: false
+
+      - name: Read development image versions
+        id: versions
+        working-directory: gitops
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          dev = Path("apps/vprofile/overlays/dev/kustomization.yaml")
+          staging = Path("apps/vprofile/overlays/staging/kustomization.yaml")
+
+          def read_images(path):
+              content = path.read_text()
+              images = {}
+              current = None
+
+              for line in content.splitlines():
+                  stripped = line.strip()
+
+                  if stripped.startswith("- name:"):
+                      current = stripped.split(":", 1)[1].strip()
+                      images[current] = None
+
+                  elif stripped.startswith("newTag:") and current:
+                      images[current] = stripped.split(":", 1)[1].strip()
+
+              return images
+
+          dev_images = read_images(dev)
+          staging_images = read_images(staging)
+
+          if len(dev_images) != 2:
+              raise SystemExit("Expected exactly two development images")
+
+          if set(dev_images) != set(staging_images):
+              raise SystemExit(
+                  "Development and staging image names differ"
+              )
+
+          tags = set(dev_images.values())
+
+          if len(tags) != 1:
+              raise SystemExit(
+                  "Application and Flyway image tags do not match"
+              )
+
+          tag = tags.pop()
+
+          if not re.fullmatch(r"[a-f0-9]{40}", tag):
+              raise SystemExit("Image tag is not a valid Git SHA")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"image_tag={tag}\n")
+
+          print(f"Development image version: {tag}")
+          print(f"Images: {list(dev_images)}")
+          PY
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify development images exist in ECR
+        working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ steps.versions.outputs.image_tag }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          path = Path("apps/vprofile/overlays/dev/kustomization.yaml")
+          tag = os.environ["IMAGE_TAG"]
+          region = os.environ["AWS_REGION"]
+
+          images = []
+
+          for line in path.read_text().splitlines():
+              stripped = line.strip()
+              if stripped.startswith("- name:"):
+                  images.append(stripped.split(":", 1)[1].strip())
+
+          for image in images:
+              registry, repository = image.split("/", 1)
+
+              if not registry.endswith(".amazonaws.com"):
+                  raise SystemExit(f"Not an ECR registry: {registry}")
+
+              registry_region = registry.split(".")[3]
+
+              if registry_region != region:
+                  raise SystemExit(
+                      f"Image region {registry_region} differs from {region}"
+                  )
+
+              subprocess.run(
+                  [
+                      "aws", "ecr", "describe-images",
+                      "--repository-name", repository,
+                      "--image-ids", f"imageTag={tag}",
+                  ],
+                  check=True,
+                  stdout=subprocess.DEVNULL,
+              )
+
+              print(f"Verified {repository}:{tag}")
+          PY
+
+      - name: Update staging image versions
+        working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ steps.versions.outputs.image_tag }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path("apps/vprofile/overlays/staging/kustomization.yaml")
+          tag = os.environ["IMAGE_TAG"]
+
+          lines = path.read_text().splitlines(keepends=True)
+          current = None
+          updated = 0
+
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+
+              if stripped.startswith("- name:"):
+                  current = stripped.split(":", 1)[1].strip()
+
+              elif stripped.startswith("newTag:") and current:
+                  indentation = line[:len(line) - len(line.lstrip())]
+                  lines[i] = f"{indentation}newTag: {tag}\n"
+                  updated += 1
+
+          if updated != 2:
+              raise SystemExit(
+                  f"Expected to update two image tags, updated {updated}"
+              )
+
+          path.write_text("".join(lines))
+          print(f"Updated staging images to {tag}")
+          PY
+
+      - name: Create staging promotion PR
+        working-directory: gitops
+        env:
+          GH_TOKEN: ${{ steps.gitops-token.outputs.token }}
+          GITOPS_REPO: ${{ vars.GITOPS_REPO }}
+          IMAGE_TAG: ${{ steps.versions.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="promotion/staging-${IMAGE_TAG}"
+
+          git config user.name "vprofile-gitops-automation[bot]"
+          git config user.email "vprofile-gitops-automation[bot]@users.noreply.github.com"
+
+          git add apps/vprofile/overlays/staging/kustomization.yaml
+
+          if git diff --cached --quiet; then
+            echo "Staging already matches development."
+            echo "No promotion PR required."
+            exit 0
+          fi
+
+          EXISTING=$(gh pr list \
+            --repo "$GITOPS_REPO" \
+            --head "$BRANCH" \
+            --base main \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            echo "Promotion PR #$EXISTING already exists."
+            exit 0
+          fi
+
+          if gh api \
+            "repos/$GITOPS_REPO/git/ref/heads/$BRANCH" \
+            > /dev/null 2>&1; then
+            echo "Promotion branch already exists."
+            echo "Review the existing branch before retrying."
+            exit 1
+          fi
+
+          git switch -c "$BRANCH"
+          git commit -m "ci: promote vProfile ${IMAGE_TAG} to staging"
+
+          AUTH_HEADER=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            push "https://github.com/${GITOPS_REPO}.git" "$BRANCH"
+
+          gh pr create \
+            --repo "$GITOPS_REPO" \
+            --head "$BRANCH" \
+            --base main \
+            --title "ci: promote vProfile ${IMAGE_TAG} to staging" \
+            --body "Promotes the application and Flyway images currently configured in development.
+
+          Image tag: ${IMAGE_TAG}
+
+          Both images have been verified in Amazon ECR.
+
+          No image rebuild is performed.
+
+          Review and merge this PR to allow Argo CD to reconcile staging."
