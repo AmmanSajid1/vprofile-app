@@ -49,12 +49,22 @@ jobs:
           staging = Path("apps/vprofile/overlays/staging/kustomization.yaml")
 
           def read_images(path):
-              content = path.read_text()
               images = {}
               current = None
+              in_images = False
 
-              for line in content.splitlines():
+              for line in path.read_text().splitlines():
                   stripped = line.strip()
+
+                  if line.startswith("images:"):
+                      in_images = True
+                      continue
+
+                  if in_images and line and not line[0].isspace() and not line.startswith("-"):
+                      break
+
+                  if not in_images:
+                      continue
 
                   if stripped.startswith("- name:"):
                       current = stripped.split(":", 1)[1].strip()
@@ -101,6 +111,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
+
       - name: Verify development images exist in ECR
         working-directory: gitops
         env:
@@ -109,6 +120,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import os
+          import re
           import subprocess
           from pathlib import Path
 
@@ -117,23 +129,38 @@ jobs:
           region = os.environ["AWS_REGION"]
 
           images = []
+          in_images = False
 
           for line in path.read_text().splitlines():
               stripped = line.strip()
-              if stripped.startswith("- name:"):
+
+              if line.startswith("images:"):
+                  in_images = True
+                  continue
+
+              if in_images and line and not line[0].isspace() and not line.startswith("-"):
+                  break
+
+              if in_images and stripped.startswith("- name:"):
                   images.append(stripped.split(":", 1)[1].strip())
+
+          if len(images) != 2:
+              raise SystemExit(f"Expected two images, found {len(images)}")
 
           for image in images:
               registry, repository = image.split("/", 1)
 
-              if not registry.endswith(".amazonaws.com"):
-                  raise SystemExit(f"Not an ECR registry: {registry}")
+              pattern = (
+                  r"^\d{12}\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$"
+              )
+              match = re.fullmatch(pattern, registry)
 
-              registry_region = registry.split(".")[3]
+              if not match:
+                  raise SystemExit(f"Invalid ECR registry: {registry}")
 
-              if registry_region != region:
+              if match.group(1) != region:
                   raise SystemExit(
-                      f"Image region {registry_region} differs from {region}"
+                      f"Image region {match.group(1)} differs from {region}"
                   )
 
               subprocess.run(
@@ -162,11 +189,22 @@ jobs:
           tag = os.environ["IMAGE_TAG"]
 
           lines = path.read_text().splitlines(keepends=True)
+          in_images = False
           current = None
-          updated = 0
+          updated = set()
 
           for i, line in enumerate(lines):
               stripped = line.strip()
+
+              if line.startswith("images:"):
+                  in_images = True
+                  continue
+
+              if in_images and line.strip() and not line[0].isspace() and not line.startswith("-"):
+                  break
+
+              if not in_images:
+                  continue
 
               if stripped.startswith("- name:"):
                   current = stripped.split(":", 1)[1].strip()
@@ -174,16 +212,17 @@ jobs:
               elif stripped.startswith("newTag:") and current:
                   indentation = line[:len(line) - len(line.lstrip())]
                   lines[i] = f"{indentation}newTag: {tag}\n"
-                  updated += 1
+                  updated.add(current)
 
-          if updated != 2:
+          if len(updated) != 2:
               raise SystemExit(
-                  f"Expected to update two image tags, updated {updated}"
+                  f"Expected two image updates, found {len(updated)}"
               )
 
           path.write_text("".join(lines))
           print(f"Updated staging images to {tag}")
           PY
+
 
       - name: Create staging promotion PR
         working-directory: gitops
